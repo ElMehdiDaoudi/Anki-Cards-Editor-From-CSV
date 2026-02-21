@@ -39,6 +39,16 @@
   .btn-ghost:hover { border-color: var(--accent2); color: var(--accent2); }
   .btn-danger { background: transparent; color: var(--danger); border: 1px solid transparent; padding: 5px 8px; border-radius: 4px; font-size: 17px; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: background 0.15s; }
   .btn-danger:hover { background: rgba(163,50,11,0.15); }
+  .card-actions { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 4px; }
+  .btn-move {
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 4px; width: 28px; height: 24px; font-size: 12px; cursor: pointer;
+    font-family: 'DM Mono', monospace; transition: all 0.15s; display: flex;
+    align-items: center; justify-content: center; line-height: 1;
+  }
+  .btn-move:hover { color: var(--accent); border-color: var(--accent); background: rgba(54,241,205,0.07); }
+  .btn-move:disabled { opacity: 0.2; cursor: not-allowed; }
+  .btn-move:disabled:hover { color: var(--muted); border-color: var(--border); background: transparent; }
   .btn-insert { background: transparent; color: var(--muted); border: none; font-size: 13px; font-family: 'DM Mono', monospace; cursor: pointer; padding: 4px 10px; border-radius: 4px; transition: all 0.15s; white-space: nowrap; }
   .btn-insert:hover { color: var(--accent); background: rgba(54,241,205,0.07); }
 
@@ -54,13 +64,13 @@
   #editor-zone { padding: 0 32px 80px; display: none; }
   .deck-info { padding: 14px 0; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
   .deck-info span { color: var(--accent2); font-weight: 400; }
-  .col-headers { display: grid; grid-template-columns: 36px 1fr 1fr 40px; gap: 10px; padding: 0 12px 8px; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  .col-headers { display: grid; grid-template-columns: 36px 1fr 1fr 72px; gap: 10px; padding: 0 12px 8px; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
 
   .insert-line { display: flex; align-items: center; gap: 8px; margin: 3px 0; opacity: 0; transition: opacity 0.2s; height: 22px; }
   .insert-line:hover, .insert-line.show { opacity: 1; }
   .insert-line hr { flex: 1; border: none; border-top: 1px dashed var(--border); }
 
-  .card-row { display: grid; grid-template-columns: 36px 1fr 1fr 40px; gap: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 2px; transition: border-color 0.15s, box-shadow 0.15s; animation: slideIn 0.18s ease; }
+  .card-row { display: grid; grid-template-columns: 36px 1fr 1fr 72px; gap: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 2px; transition: border-color 0.15s, box-shadow 0.15s; animation: slideIn 0.18s ease; }
   @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
   .card-row:hover { border-color: #2892d7; box-shadow: 0 2px 16px rgba(0,0,0,0.5); }
 
@@ -82,7 +92,6 @@
   .card-field-preview ol { padding-left: 1.4em; margin: 4px 0; list-style-type: decimal; }
   .card-field-preview li { margin: 2px 0; line-height: 1.6; }
 
-  .card-actions { display: flex; align-items: flex-start; padding-top: 6px; }
 
   /* ── EXPORT BAR ── */
   #export-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 14px 32px; display: none; align-items: center; justify-content: space-between; z-index: 100; }
@@ -576,7 +585,11 @@ function renderCards() {
 
     const actions = document.createElement('div');
     actions.className = 'card-actions';
-    actions.innerHTML = `<button class="btn-danger" title="Delete card" onclick="deleteCard(this)">✕</button>`;
+    actions.innerHTML = `
+      <button class="btn-move" title="Move up" onclick="moveCard(this,-1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+      <button class="btn-danger" title="Delete card" onclick="deleteCard(this)">✕</button>
+      <button class="btn-move" title="Move down" onclick="moveCard(this,1)" ${i === cards.length - 1 ? 'disabled' : ''}>▼</button>
+    `;
     row.appendChild(actions);
 
     list.appendChild(row);
@@ -918,6 +931,20 @@ document.addEventListener('keydown', (e) => {
     pageRedo();
   }
 });
+
+function moveCard(btn, dir) {
+  const row = btn.closest('.card-row');
+  const i = parseInt(row.dataset.index);
+  const j = i + dir;
+  if (j < 0 || j >= cards.length) return;
+  recordPageUndo();
+  // Swap cards and meta
+  [cards[i], cards[j]] = [cards[j], cards[i]];
+  [meta[i],  meta[j]]  = [meta[j],  meta[i]];
+  const scrollY = window.scrollY;
+  renderCards();
+  window.scrollTo(0, scrollY);
+}
 
 function deleteCard(btn) {
   const row = btn.closest('.card-row');
