@@ -78,6 +78,9 @@
   .card-field-preview.front { border-left: 2px solid rgba(241,219,75,0.25); }
   .card-field-preview.back  { border-left: 2px solid rgba(40,146,215,0.2); }
   .card-field-preview.empty { color: var(--muted); font-style: italic; }
+  .card-field-preview ul { padding-left: 1.4em; margin: 4px 0; list-style-type: disc; }
+  .card-field-preview ol { padding-left: 1.4em; margin: 4px 0; list-style-type: decimal; }
+  .card-field-preview li { margin: 2px 0; line-height: 1.6; }
 
   .card-actions { display: flex; align-items: flex-start; padding-top: 6px; }
 
@@ -127,6 +130,7 @@
   .tb-color-purple  { background: rgba(180,80,255,0.15); color: #c878ff; }
   .tb-color-orange  { background: rgba(255,160,50,0.15); color: orange; }
   .tb-color-green   { background: rgba(80,255,130,0.15); color: #50ff82; }
+  .tb-color-white   { background: rgba(255,255,255,0.08); color: #ffffff; border: 1px solid rgba(255,255,255,0.25); }
 
   .tb-btn {
     background: var(--surface); color: var(--text); border: 1px solid var(--border);
@@ -154,6 +158,10 @@
   #rich-editor span[style*="color:purple"] { color: #c878ff; }
   #rich-editor span[style*="color:orange"] { color: orange; }
   #rich-editor span[style*="color:green"]  { color: #50ff82; }
+  #rich-editor span[style*="color:white"]  { color: #ffffff; }
+  #rich-editor ul { padding-left: 1.4em; margin: 4px 0; list-style-type: disc; }
+  #rich-editor ol { padding-left: 1.4em; margin: 4px 0; list-style-type: decimal; }
+  #rich-editor li { margin: 2px 0; line-height: 1.6; }
 
   .html-preview-label { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
   #html-preview {
@@ -277,8 +285,12 @@
         <button class="tb-color tb-color-purple" title="Purple" onclick="applyColor('purple')">P</button>
         <button class="tb-color tb-color-orange" title="Orange" onclick="applyColor('orange')">O</button>
         <button class="tb-color tb-color-green"  title="Green"  onclick="applyColor('green')">G</button>
+        <button class="tb-color tb-color-white"  title="White"  onclick="applyColor('white')">W</button>
         <div class="tb-sep"></div>
         <button class="tb-btn" title="Remove color from selection" onclick="removeColor()">✕ color</button>
+        <div class="tb-sep"></div>
+        <button class="tb-btn" title="Bullet list" onclick="insertList('ul')">• list</button>
+        <button class="tb-btn" title="Numbered list" onclick="insertList('ol')">1. list</button>
         <div class="tb-sep"></div>
         <button class="tb-btn" title="Insert line break" onclick="insertBr()">↵ br</button>
         <div class="tb-sep"></div>
@@ -422,7 +434,7 @@ function htmlToEditable(html) {
  *  - Strip everything else (bold, italic, divs, etc.)
  *  - Collapse nested/adjacent same-colour spans
  */
-const ALLOWED_COLORS = new Set(['cyan','red','purple','orange','green']);
+const ALLOWED_COLORS = new Set(['cyan','red','purple','orange','green','white']);
 
 function serializeEditor(el) {
   return serializeNode(el).trim();
@@ -454,9 +466,20 @@ function serializeNode(node) {
   // div/p → treat as line break separator (browser inserts these)
   if (tag === 'div' || tag === 'p') {
     const inner = Array.from(node.childNodes).map(serializeNode).join('');
-    // If this div is the contenteditable root itself, skip wrapping
     if (node.id === 'rich-editor') return inner;
     return inner ? inner + '<br>' : '<br>';
+  }
+
+  // <ul> / <ol>
+  if (tag === 'ul' || tag === 'ol') {
+    const inner = Array.from(node.childNodes).map(serializeNode).join('');
+    return `<${tag}>${inner}</${tag}>`;
+  }
+
+  // <li>
+  if (tag === 'li') {
+    const inner = Array.from(node.childNodes).map(serializeNode).join('');
+    return `<li>${inner}</li>`;
   }
 
   // anything else → just children
@@ -724,6 +747,61 @@ function removeColor() {
   // Re-render the range area
   range.deleteContents();
   range.insertNode(frag);
+
+  updateHtmlPreview();
+  recordUndo();
+  editor.focus();
+}
+
+function insertList(type) {
+  const editor = document.getElementById('rich-editor');
+  restoreSelection();
+  const sel = window.getSelection();
+
+  let range;
+  if (sel && sel.rangeCount > 0 && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    range = sel.getRangeAt(0);
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  }
+
+  // Check if we're already inside a list of this type → unwrap
+  let ancestor = range.commonAncestorContainer;
+  if (ancestor.nodeType === Node.TEXT_NODE) ancestor = ancestor.parentNode;
+  const existingList = ancestor.closest ? ancestor.closest(type) : null;
+
+  if (existingList && editor.contains(existingList)) {
+    // Unwrap: replace list with its text content joined by <br>
+    const items = existingList.querySelectorAll('li');
+    const frag = document.createDocumentFragment();
+    items.forEach((li, idx) => {
+      // clone children
+      Array.from(li.childNodes).forEach(n => frag.appendChild(n.cloneNode(true)));
+      if (idx < items.length - 1) frag.appendChild(document.createElement('br'));
+    });
+    existingList.parentNode.replaceChild(frag, existingList);
+  } else {
+    // Wrap selected content (or current line) in a list
+    const list = document.createElement(type);
+    const li   = document.createElement('li');
+
+    if (!range.collapsed) {
+      li.appendChild(range.extractContents());
+    } else {
+      li.appendChild(document.createTextNode(''));
+    }
+    list.appendChild(li);
+    range.insertNode(list);
+
+    // Place caret inside the li
+    const newRange = document.createRange();
+    newRange.setStart(li, li.childNodes.length);
+    newRange.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+  }
 
   updateHtmlPreview();
   recordUndo();
