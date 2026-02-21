@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anki CSV Editor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap');
+
+  :root {
+    --bg:      #0a0a0a;
+    --surface: #141414;
+    --border:  #2a2a2a;
+    --accent:  #36f1cd;
+    --accent2: #2892d7;
+    --text:    #c8c8c8;
+    --muted:   #555555;
+    --danger:  #a3320b;
+    --card-bg: #141414;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+
+  /* ── HEADER ── */
+  header {
+    padding: 20px 32px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; background: var(--bg); z-index: 100;
+  }
+  header h1 { font-size: 19px; font-weight: 500; color: var(--accent); letter-spacing: 0.2px; }
+  .header-actions { display: flex; gap: 10px; align-items: center; }
+
+  /* ── BUTTONS ── */
+  .btn { font-family: 'DM Sans', sans-serif; font-weight: 500; font-size: 16px; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+  .btn-accent { background: var(--accent); color: #0a0a0a; font-weight: 500; }
+  .btn-accent:hover { background: #22c9a8; transform: translateY(-1px); }
+  .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--accent2); color: var(--accent2); }
+  .btn-danger { background: transparent; color: var(--danger); border: 1px solid transparent; padding: 5px 8px; border-radius: 4px; font-size: 17px; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: background 0.15s; }
+  .btn-danger:hover { background: rgba(163,50,11,0.15); }
+  .btn-insert { background: transparent; color: var(--muted); border: none; font-size: 13px; font-family: 'DM Mono', monospace; cursor: pointer; padding: 4px 10px; border-radius: 4px; transition: all 0.15s; white-space: nowrap; }
+  .btn-insert:hover { color: var(--accent); background: rgba(54,241,205,0.07); }
+
+  /* ── IMPORT ── */
+  #import-zone { padding: 40px 32px; display: flex; flex-direction: column; gap: 16px; }
+  .import-label { font-size: 16px; color: var(--muted); font-family: 'DM Mono', monospace; }
+  #csv-input { width: 100%; height: 160px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 13px; padding: 16px; resize: vertical; outline: none; transition: border-color 0.2s; }
+  #csv-input:focus { border-color: var(--accent2); }
+  #csv-input::placeholder { color: var(--muted); }
+  .import-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  /* ── EDITOR ZONE ── */
+  #editor-zone { padding: 0 32px 80px; display: none; }
+  .deck-info { padding: 14px 0; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .deck-info span { color: var(--accent2); font-weight: 400; }
+  .col-headers { display: grid; grid-template-columns: 36px 1fr 1fr 40px; gap: 10px; padding: 0 12px 8px; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+
+  .insert-line { display: flex; align-items: center; gap: 8px; margin: 3px 0; opacity: 0; transition: opacity 0.2s; height: 22px; }
+  .insert-line:hover, .insert-line.show { opacity: 1; }
+  .insert-line hr { flex: 1; border: none; border-top: 1px dashed var(--border); }
+
+  .card-row { display: grid; grid-template-columns: 36px 1fr 1fr 40px; gap: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 2px; transition: border-color 0.15s, box-shadow 0.15s; animation: slideIn 0.18s ease; }
+  @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+  .card-row:hover { border-color: #2892d7; box-shadow: 0 2px 16px rgba(0,0,0,0.5); }
+
+  .card-num { display: flex; align-items: flex-start; justify-content: center; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); padding-top: 10px; }
+
+  /* Card field preview — clickable, rendered HTML */
+  .card-field-preview {
+    min-height: 48px; background: transparent; border: 1px solid transparent;
+    border-radius: 5px; font-family: 'DM Sans', sans-serif; font-size: 16px;
+    padding: 8px 10px; width: 100%; line-height: 1.6; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s; color: var(--text);
+    word-break: break-word;
+  }
+  .card-field-preview:hover { border-color: var(--border); background: rgba(255,255,255,0.03); }
+  .card-field-preview.front { border-left: 2px solid rgba(241,219,75,0.25); }
+  .card-field-preview.back  { border-left: 2px solid rgba(40,146,215,0.2); }
+  .card-field-preview.empty { color: var(--muted); font-style: italic; }
+
+  .card-actions { display: flex; align-items: flex-start; padding-top: 6px; }
+
+  /* ── EXPORT BAR ── */
+  #export-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 14px 32px; display: none; align-items: center; justify-content: space-between; z-index: 100; }
+  #export-bar.visible { display: flex; }
+  .export-info { font-family: 'DM Mono', monospace; font-size: 14px; color: var(--muted); }
+  .export-info strong { color: var(--text); }
+
+  /* ── SEARCH ── */
+  #search-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 16px; padding: 7px 12px; outline: none; width: 220px; transition: border-color 0.2s; }
+  #search-box:focus { border-color: var(--accent2); }
+  #search-box::placeholder { color: var(--muted); }
+
+  /* ── SHARED MODAL BASE ── */
+  .modal-overlay { display: none; position: fixed; inset: 0; z-index: 300; background: rgba(10,10,10,0.88); backdrop-filter: blur(4px); align-items: center; justify-content: center; }
+  .modal-overlay.visible { display: flex; }
+  .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 820px; max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; animation: modalIn 0.2s ease; }
+  @keyframes modalIn { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
+  .modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 10px; }
+  .modal-header h2 { font-size: 17px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+  .modal-body { padding: 16px 18px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+  .modal-footer { padding: 12px 18px; border-top: 1px solid var(--border); flex-shrink: 0; display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+
+  /* ── RICH TEXT EDITOR MODAL ── */
+  #rich-editor-label {
+    font-family: 'DM Mono', monospace; font-size: 13px; color: var(--accent2); text-transform: uppercase; letter-spacing: 0.6px;
+  }
+
+  .rich-toolbar {
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px 8px 0 0; flex-shrink: 0;
+  }
+  .rich-toolbar .tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+
+  .tb-color {
+    width: 26px; height: 26px; border-radius: 5px; border: 2px solid transparent;
+    cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 500; font-family: 'DM Mono', monospace;
+    flex-shrink: 0;
+  }
+  .tb-color:hover { transform: scale(1.15); }
+  .tb-color.active { border-color: #f1db4b; box-shadow: 0 0 0 1px rgba(241,219,75,0.3); }
+  .tb-color-cyan    { background: rgba(0,255,255,0.15); color: cyan; }
+  .tb-color-red     { background: rgba(255,80,80,0.15); color: #ff5a5a; }
+  .tb-color-purple  { background: rgba(180,80,255,0.15); color: #c878ff; }
+  .tb-color-orange  { background: rgba(255,160,50,0.15); color: orange; }
+  .tb-color-green   { background: rgba(80,255,130,0.15); color: #50ff82; }
+
+  .tb-btn {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 5px; padding: 4px 10px; font-size: 14px; cursor: pointer;
+    font-family: 'DM Mono', monospace; transition: all 0.15s; flex-shrink: 0;
+  }
+  .tb-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+  .tb-btn.active { background: rgba(40,146,215,0.1); border-color: var(--accent2); color: var(--accent2); }
+
+  .tb-label { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-right: 2px; }
+
+  #rich-editor {
+    flex: 1; min-height: 240px; max-height: 520px; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border); border-top: none;
+    border-radius: 0 0 8px 8px; padding: 14px; outline: none;
+    font-family: 'DM Sans', sans-serif; font-size: 17px; line-height: 1.7;
+    color: var(--text); word-break: break-word;
+  }
+  #rich-editor:focus { border-color: var(--accent2); }
+  #rich-editor br { display: block; content: ""; margin: 2px 0; }
+
+  /* colour swatches in the editor itself */
+  #rich-editor span[style*="color:cyan"]   { color: cyan; }
+  #rich-editor span[style*="color:red"]    { color: #ff5a5a; }
+  #rich-editor span[style*="color:purple"] { color: #c878ff; }
+  #rich-editor span[style*="color:orange"] { color: orange; }
+  #rich-editor span[style*="color:green"]  { color: #50ff82; }
+
+  .html-preview-label { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
+  #html-preview {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; font-family: 'DM Mono', monospace; font-size: 12px;
+    color: var(--muted); line-height: 1.6; word-break: break-all;
+    max-height: 80px; overflow-y: auto; flex-shrink: 0;
+  }
+
+  /* ── EXPORT MODAL ── */
+  #export-textarea { width: 100%; flex: 1; min-height: 360px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 13px; padding: 14px; resize: none; outline: none; line-height: 1.7; }
+  #export-textarea:focus { border-color: var(--accent2); }
+  .copy-hint { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); margin-right: auto; }
+
+  /* ── TOAST ── */
+  #toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--card-bg); border: 1px solid var(--border); color: var(--text); padding: 10px 20px; border-radius: 8px; font-size: 16px; font-family: 'DM Mono', monospace; opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 600; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); font-family: 'DM Mono', monospace; font-size: 16px; }
+
+  /* ── FONT SLIDER ── */
+  .font-slider-wrap {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 12px;
+  }
+  .slider-label {
+    font-family: 'DM Mono', monospace; color: var(--muted);
+    font-size: 12px; user-select: none; line-height: 1;
+  }
+  .slider-label.lg { font-size: 18px; }
+  #font-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 90px; height: 3px;
+    background: var(--border); border-radius: 2px; outline: none; cursor: pointer;
+    transition: background 0.2s;
+  }
+  #font-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 13px; height: 13px; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+    transition: transform 0.15s;
+  }
+  #font-slider::-webkit-slider-thumb:hover { transform: scale(1.3); }
+  #font-slider::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; border: none;
+    background: var(--accent); cursor: pointer;
+  }
+
+
+  /* ── UNDO/REDO BUTTONS ── */
+  .tb-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+  .tb-btn:disabled:hover { border-color: var(--border); color: var(--text); }
+
+  .btn-ghost:disabled { opacity: 0.28; cursor: not-allowed; }
+  .btn-ghost:disabled:hover { border-color: var(--border); color: var(--text); transform: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ Anki CSV Editor</h1>
+  <div class="header-actions">
+    <div class="font-slider-wrap" id="font-slider-wrap" style="display:none">
+      <span class="slider-label">A</span>
+      <input type="range" id="font-slider" min="11" max="22" value="14" step="1" oninput="applyFontSize(this.value)">
+      <span class="slider-label lg">A</span>
+    </div>
+    <div id="page-undo-wrap" style="display:none;gap:6px;align-items:center">
+      <button class="btn btn-ghost" id="page-btn-undo" onclick="pageUndo()" disabled title="Undo (Ctrl+Z)">↩ undo</button>
+      <button class="btn btn-ghost" id="page-btn-redo" onclick="pageRedo()" disabled title="Redo (Ctrl+Y)">↪ redo</button>
+    </div>
+    <input id="search-box" type="text" placeholder="Search cards…" oninput="filterCards(this.value)" style="display:none">
+    <button class="btn btn-ghost" onclick="resetImport()" id="reset-btn" style="display:none">↩ New Import</button>
+    <button class="btn btn-accent" onclick="openExport()" id="export-btn" style="display:none">⬇ Export CSV</button>
+  </div>
+</header>
+
+<!-- IMPORT -->
+<div id="import-zone">
+  <div class="import-label">// paste your CSV content below</div>
+  <textarea id="csv-input" placeholder="Deck&#9;Type&#9;Tag&#9;Front&#9;Back&#10;..."></textarea>
+  <div class="import-row">
+    <button class="btn btn-accent" onclick="parseCSV()">Parse CSV →</button>
+    <button class="btn btn-ghost" onclick="loadDemo()">Load Demo</button>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted)">Tab-separated · Deck / Type / Tag / Front / Back</span>
+  </div>
+</div>
+
+<!-- EDITOR -->
+<div id="editor-zone">
+  <div class="deck-info" id="deck-info"></div>
+  <div class="col-headers">
+    <div>#</div><div>🟡 Front</div><div>🔵 Back</div><div></div>
+  </div>
+  <div id="cards-list"></div>
+</div>
+
+<!-- EXPORT BAR -->
+<div id="export-bar">
+  <div class="export-info"><strong id="card-count">0</strong> cards</div>
+  <div style="display:flex;gap:10px">
+    <button class="btn btn-ghost" onclick="addCardAtEnd()">+ Add Card</button>
+    <button class="btn btn-accent" onclick="openExport()">⬇ Export CSV</button>
+  </div>
+</div>
+
+<!-- RICH TEXT EDITOR MODAL -->
+<div class="modal-overlay" id="rich-modal">
+  <div class="modal-box" style="max-width:640px">
+    <div class="modal-header">
+      <h2>Edit Card Field</h2>
+      <span id="rich-editor-label">front</span>
+    </div>
+    <div class="modal-body">
+      <!-- Toolbar -->
+      <div class="rich-toolbar">
+        <span class="tb-label">color:</span>
+        <button class="tb-color tb-color-cyan"   title="Cyan"   onclick="applyColor('cyan')">C</button>
+        <button class="tb-color tb-color-red"    title="Red"    onclick="applyColor('red')">R</button>
+        <button class="tb-color tb-color-purple" title="Purple" onclick="applyColor('purple')">P</button>
+        <button class="tb-color tb-color-orange" title="Orange" onclick="applyColor('orange')">O</button>
+        <button class="tb-color tb-color-green"  title="Green"  onclick="applyColor('green')">G</button>
+        <div class="tb-sep"></div>
+        <button class="tb-btn" title="Remove color from selection" onclick="removeColor()">✕ color</button>
+        <div class="tb-sep"></div>
+        <button class="tb-btn" title="Insert line break" onclick="insertBr()">↵ br</button>
+        <div class="tb-sep"></div>
+        <button class="tb-btn" id="btn-undo" title="Undo (Ctrl+Z)" onclick="editorUndo()" disabled>↩ undo</button>
+        <button class="tb-btn" id="btn-redo" title="Redo (Ctrl+Y)" onclick="editorRedo()" disabled>↪ redo</button>
+      </div>
+      <!-- ContentEditable area -->
+      <div id="rich-editor" contenteditable="true" spellcheck="true"></div>
+      <!-- Live HTML preview -->
+      <div class="html-preview-label">// output HTML</div>
+      <div id="html-preview"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeRichEditor(false)">Cancel</button>
+      <button class="btn btn-accent" onclick="closeRichEditor(true)">Save ✓</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXPORT MODAL -->
+<div class="modal-overlay" id="export-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2>Export CSV</h2>
+      <span id="export-count"></span>
+    </div>
+    <div class="modal-body">
+      <textarea id="export-textarea" readonly spellcheck="false"></textarea>
+    </div>
+    <div class="modal-footer">
+      <span class="copy-hint">// ready to paste back into your AI tool</span>
+      <button class="btn btn-ghost" onclick="closeExport()">Close</button>
+      <button class="btn btn-accent" onclick="copyExport()">⎘ Copy All</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── FONT SIZE ────────────────────────────────────────────────────────
+function applyFontSize(val) {
+  // Only affect card preview text, not UI chrome
+  document.querySelectorAll('.card-field-preview').forEach(el => {
+    el.style.fontSize = val + 'px';
+  });
+  document.getElementById('font-slider').value = val;
+}
+
+// ── DATA ─────────────────────────────────────────────────────────────
+// cards[i] = { frontHtml, backHtml }
+// meta[i]  = { deck, type, tag }
+let cards = [];
+let meta  = [];
+let filterText = '';
+
+// ── RICH EDITOR STATE ─────────────────────────────────────────────────
+let richCardIndex = -1;
+let richField     = '';   // 'front' | 'back'
+let savedSel      = null; // saved Selection for toolbar ops
+
+// ── UNDO / REDO STACK ─────────────────────────────────────────────────
+const UNDO_LIMIT = 100;
+let undoStack = [];
+let redoStack = [];
+let isUndoRedo = false; // flag to prevent recording undo during undo/redo
+
+function recordUndo() {
+  if (isUndoRedo) return;
+  const editor = document.getElementById('rich-editor');
+  const snapshot = editor.innerHTML;
+  // Avoid recording identical consecutive states
+  if (undoStack.length && undoStack[undoStack.length - 1] === snapshot) return;
+  undoStack.push(snapshot);
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack = []; // any new action clears redo
+  updateUndoButtons();
+}
+
+function editorUndo() {
+  if (undoStack.length < 2) return; // need at least current + one past state
+  const editor = document.getElementById('rich-editor');
+  isUndoRedo = true;
+  redoStack.push(undoStack.pop()); // move current to redo
+  editor.innerHTML = undoStack[undoStack.length - 1];
+  placeCaretAtEnd(editor);
+  updateHtmlPreview();
+  updateUndoButtons();
+  isUndoRedo = false;
+}
+
+function editorRedo() {
+  if (!redoStack.length) return;
+  const editor = document.getElementById('rich-editor');
+  isUndoRedo = true;
+  const next = redoStack.pop();
+  undoStack.push(next);
+  editor.innerHTML = next;
+  placeCaretAtEnd(editor);
+  updateHtmlPreview();
+  updateUndoButtons();
+  isUndoRedo = false;
+}
+
+function updateUndoButtons() {
+  const u = document.getElementById('btn-undo');
+  const r = document.getElementById('btn-redo');
+  if (u) u.disabled = undoStack.length < 2;
+  if (r) r.disabled = redoStack.length === 0;
+}
+
+function resetUndoHistory(initialHtml) {
+  undoStack = [initialHtml];
+  redoStack = [];
+  updateUndoButtons();
+}
+
+// ── HTML HELPERS ──────────────────────────────────────────────────────
+
+function htmlToText(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  return d.innerText || d.textContent || '';
+}
+
+/**
+ * Convert our stored HTML → contenteditable-friendly HTML.
+ * <br> stays as <br>, spans stay as spans.
+ * We wrap in a <div> so the browser doesn't split into paragraphs.
+ */
+function htmlToEditable(html) {
+  // Normalise <br> variants
+  return html.replace(/<br\s*\/?>/gi, '<br>');
+}
+
+/**
+ * Serialise the contenteditable div back to clean HTML.
+ * Rules:
+ *  - Only keep <span style="color:COLOR"> where COLOR ∈ allowed set
+ *  - Keep <br>
+ *  - Strip everything else (bold, italic, divs, etc.)
+ *  - Collapse nested/adjacent same-colour spans
+ */
+const ALLOWED_COLORS = new Set(['cyan','red','purple','orange','green']);
+
+function serializeEditor(el) {
+  return serializeNode(el).trim();
+}
+
+function serializeNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent; // keep raw — no escaping needed for our CSV
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+  const tag = node.tagName.toLowerCase();
+
+  // <br>
+  if (tag === 'br') return '<br>';
+
+  // <span style="color:X"> — only if allowed color
+  if (tag === 'span') {
+    const style = node.getAttribute('style') || '';
+    const m = style.match(/color\s*:\s*(\w+)/);
+    if (m && ALLOWED_COLORS.has(m[1])) {
+      const inner = Array.from(node.childNodes).map(serializeNode).join('');
+      return `<span style="color:${m[1]}">${inner}</span>`;
+    }
+    // span with no/disallowed color → just serialize children
+    return Array.from(node.childNodes).map(serializeNode).join('');
+  }
+
+  // div/p → treat as line break separator (browser inserts these)
+  if (tag === 'div' || tag === 'p') {
+    const inner = Array.from(node.childNodes).map(serializeNode).join('');
+    // If this div is the contenteditable root itself, skip wrapping
+    if (node.id === 'rich-editor') return inner;
+    return inner ? inner + '<br>' : '<br>';
+  }
+
+  // anything else → just children
+  return Array.from(node.childNodes).map(serializeNode).join('');
+}
+
+// ── PARSE CSV ─────────────────────────────────────────────────────────
+
+function parseCSV() {
+  const raw = document.getElementById('csv-input').value.trim();
+  if (!raw) return toast('Paste some CSV first!');
+  const lines = raw.split('\n');
+  cards = []; meta = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const cols = line.split('\t');
+    if (cols.length < 2) continue;
+    meta.push({ deck: cols[0]||'', type: cols[1]||'', tag: cols[2]||'' });
+    cards.push({ frontHtml: cols[3]||'', backHtml: cols[4]||'' });
+  }
+  if (!cards.length) return toast('No valid rows found.');
+  showEditor();
+}
+
+// ── SHOW EDITOR ───────────────────────────────────────────────────────
+
+function showEditor() {
+  document.getElementById('import-zone').style.display = 'none';
+  document.getElementById('editor-zone').style.display = 'block';
+  document.getElementById('export-bar').classList.add('visible');
+  document.getElementById('export-btn').style.display = '';
+  document.getElementById('reset-btn').style.display = '';
+  document.getElementById('search-box').style.display = '';
+  document.getElementById('font-slider-wrap').style.display = '';
+  document.getElementById('page-undo-wrap').style.display = 'flex';
+  recordPageUndo(); // seed initial state
+  const decks = [...new Set(meta.map(m=>m.deck))];
+  const tags  = [...new Set(meta.map(m=>m.tag))];
+  document.getElementById('deck-info').innerHTML =
+    `<div>deck: <span>${decks.join(', ')}</span></div>` +
+    `<div>total: <span>${cards.length} cards</span></div>` +
+    `<div>tags: <span>${tags.length}</span></div>`;
+  renderCards();
+}
+
+// ── RENDER CARDS ──────────────────────────────────────────────────────
+
+function renderCards() {
+  const list   = document.getElementById('cards-list');
+  const filter = filterText.toLowerCase();
+  list.innerHTML = '';
+
+  if (!cards.length) {
+    list.innerHTML = '<div class="empty-state">// no cards yet · click "+ Add Card" below</div>';
+    updateCount(); return;
+  }
+
+  list.appendChild(makeInsertLine(0));
+
+  cards.forEach((card, i) => {
+    const ft = htmlToText(card.frontHtml).toLowerCase();
+    const bt = htmlToText(card.backHtml).toLowerCase();
+    if (filter && !ft.includes(filter) && !bt.includes(filter)) return;
+
+    const row = document.createElement('div');
+    row.className = 'card-row';
+    row.dataset.index = i;
+
+    // Front preview
+    const frontPrev = document.createElement('div');
+    frontPrev.className = 'card-field-preview front';
+    if (card.frontHtml) {
+      frontPrev.innerHTML = card.frontHtml;
+    } else {
+      frontPrev.textContent = 'Click to edit front…';
+      frontPrev.classList.add('empty');
+    }
+    frontPrev.addEventListener('click', () => openRichEditor(i, 'front'));
+
+    // Back preview
+    const backPrev = document.createElement('div');
+    backPrev.className = 'card-field-preview back';
+    if (card.backHtml) {
+      backPrev.innerHTML = card.backHtml;
+    } else {
+      backPrev.textContent = 'Click to edit back…';
+      backPrev.classList.add('empty');
+    }
+    backPrev.addEventListener('click', () => openRichEditor(i, 'back'));
+
+    row.innerHTML = `<div class="card-num">${i + 1}</div>`;
+    row.appendChild(frontPrev);
+    row.appendChild(backPrev);
+
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+    actions.innerHTML = `<button class="btn-danger" title="Delete card" onclick="deleteCard(this)">✕</button>`;
+    row.appendChild(actions);
+
+    list.appendChild(row);
+    list.appendChild(makeInsertLine(i + 1));
+  });
+
+  updateCount();
+  // Re-apply font size to freshly rendered previews
+  const sz = document.getElementById('font-slider');
+  if (sz) applyFontSize(sz.value);
+}
+
+function makeInsertLine(pos) {
+  const div = document.createElement('div');
+  div.className = 'insert-line';
+  div.innerHTML = `<hr><button class="btn-insert" onclick="insertCardAt(${pos})">＋ insert here</button><hr>`;
+  div.addEventListener('mouseenter', () => div.classList.add('show'));
+  div.addEventListener('mouseleave', () => div.classList.remove('show'));
+  return div;
+}
+
+// ── RICH EDITOR ───────────────────────────────────────────────────────
+
+function openRichEditor(cardIdx, field) {
+  richCardIndex = cardIdx;
+  richField     = field;
+
+  const html = field === 'front' ? cards[cardIdx].frontHtml : cards[cardIdx].backHtml;
+
+  document.getElementById('rich-editor-label').textContent =
+    `card #${cardIdx + 1} · ${field}`;
+
+  const editor = document.getElementById('rich-editor');
+  editor.innerHTML = htmlToEditable(html);
+  updateHtmlPreview();
+  resetUndoHistory(editor.innerHTML);
+
+  document.getElementById('rich-modal').classList.add('visible');
+  setTimeout(() => { editor.focus(); placeCaretAtEnd(editor); }, 80);
+}
+
+function closeRichEditor(save) {
+  if (save) {
+    recordPageUndo();
+    const editor = document.getElementById('rich-editor');
+    const newHtml = serializeEditor(editor);
+    if (richField === 'front') cards[richCardIndex].frontHtml = newHtml;
+    else                       cards[richCardIndex].backHtml  = newHtml;
+    const scrollY = window.scrollY;
+    renderCards();
+    window.scrollTo(0, scrollY);
+    toast('Saved ✓');
+  }
+  document.getElementById('rich-modal').classList.remove('visible');
+}
+
+// Live HTML preview + undo recording
+let undoDebounceTimer = null;
+document.getElementById('rich-editor').addEventListener('input', () => {
+  updateHtmlPreview();
+  clearTimeout(undoDebounceTimer);
+  undoDebounceTimer = setTimeout(recordUndo, 400);
+});
+
+function updateHtmlPreview() {
+  const editor = document.getElementById('rich-editor');
+  const html = serializeEditor(editor);
+  document.getElementById('html-preview').textContent = html;
+}
+
+// ── TOOLBAR ACTIONS ───────────────────────────────────────────────────
+
+function saveSelection() {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) savedSel = sel.getRangeAt(0).cloneRange();
+}
+
+function restoreSelection() {
+  if (!savedSel) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(savedSel);
+}
+
+// Track selection before toolbar buttons steal focus
+document.getElementById('rich-editor').addEventListener('mouseup', saveSelection);
+document.getElementById('rich-editor').addEventListener('keyup',   saveSelection);
+
+// Undo / Redo keyboard shortcuts
+document.getElementById('rich-editor').addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+    e.preventDefault();
+    editorUndo();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+    e.preventDefault();
+    editorRedo();
+  }
+});
+
+function applyColor(color) {
+  const editor = document.getElementById('rich-editor');
+  restoreSelection();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+    toast('Select some text first');
+    return;
+  }
+  const range = sel.getRangeAt(0);
+
+  // Make sure selection is inside the editor
+  if (!editor.contains(range.commonAncestorContainer)) return;
+
+  const span = document.createElement('span');
+  span.setAttribute('style', `color:${color}`);
+
+  try {
+    range.surroundContents(span);
+  } catch(e) {
+    // surroundContents fails on partial selections crossing elements
+    // fallback: wrap extracted contents
+    const frag = range.extractContents();
+    span.appendChild(frag);
+    range.insertNode(span);
+  }
+
+  // Collapse selection to end
+  sel.removeAllRanges();
+  const newRange = document.createRange();
+  newRange.setStartAfter(span);
+  newRange.collapse(true);
+  sel.addRange(newRange);
+
+  updateHtmlPreview();
+  recordUndo();
+  editor.focus();
+}
+
+function removeColor() {
+  const editor = document.getElementById('rich-editor');
+  restoreSelection();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+    toast('Select some text first');
+    return;
+  }
+  const range = sel.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return;
+
+  // Walk all spans inside the range and unwrap them
+  const frag = range.cloneContents();
+  const spans = frag.querySelectorAll('span');
+  spans.forEach(s => {
+    const parent = s.parentNode;
+    while (s.firstChild) parent.insertBefore(s.firstChild, s);
+    parent.removeChild(s);
+  });
+
+  // Also check if the selection is entirely inside a span
+  let ancestor = range.commonAncestorContainer;
+  if (ancestor.nodeType === Node.TEXT_NODE) ancestor = ancestor.parentNode;
+  if (ancestor.tagName === 'SPAN' && ancestor !== editor) {
+    // Unwrap
+    const p = ancestor.parentNode;
+    while (ancestor.firstChild) p.insertBefore(ancestor.firstChild, ancestor);
+    p.removeChild(ancestor);
+  }
+
+  // Re-render the range area
+  range.deleteContents();
+  range.insertNode(frag);
+
+  updateHtmlPreview();
+  recordUndo();
+  editor.focus();
+}
+
+function insertBr() {
+  const editor = document.getElementById('rich-editor');
+  restoreSelection();
+  const sel = window.getSelection();
+
+  let range;
+  if (sel && sel.rangeCount > 0 && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    range = sel.getRangeAt(0);
+  } else {
+    // Put at end
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  }
+
+  range.deleteContents();
+  const br = document.createElement('br');
+  range.insertNode(br);
+
+  // Move cursor after br
+  const after = document.createRange();
+  after.setStartAfter(br);
+  after.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(after);
+
+  updateHtmlPreview();
+  recordUndo();
+  editor.focus();
+}
+
+function placeCaretAtEnd(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+// Close rich modal on backdrop click
+document.getElementById('rich-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeRichEditor(false);
+});
+
+// ── CARD OPS ──────────────────────────────────────────────────────────
+
+
+// ── PAGE-LEVEL UNDO / REDO ────────────────────────────────────────────
+const PAGE_UNDO_LIMIT = 100;
+let pageUndoStack = [];
+let pageRedoStack = [];
+
+function snapshotState() {
+  return JSON.stringify({ cards: cards.map(c => ({...c})), meta: meta.map(m => ({...m})) });
+}
+
+function recordPageUndo() {
+  const snap = snapshotState();
+  if (pageUndoStack.length && pageUndoStack[pageUndoStack.length - 1] === snap) return;
+  pageUndoStack.push(snap);
+  if (pageUndoStack.length > PAGE_UNDO_LIMIT) pageUndoStack.shift();
+  pageRedoStack = [];
+  updatePageUndoButtons();
+}
+
+function applySnapshot(snap) {
+  const state = JSON.parse(snap);
+  cards = state.cards;
+  meta  = state.meta;
+  const scrollY = window.scrollY;
+  renderCards();
+  window.scrollTo(0, scrollY);
+  updatePageUndoButtons();
+}
+
+function pageUndo() {
+  if (pageUndoStack.length < 2) return;
+  pageRedoStack.push(pageUndoStack.pop());
+  applySnapshot(pageUndoStack[pageUndoStack.length - 1]);
+  toast('Undone');
+}
+
+function pageRedo() {
+  if (!pageRedoStack.length) return;
+  const next = pageRedoStack.pop();
+  pageUndoStack.push(next);
+  applySnapshot(next);
+  toast('Redone');
+}
+
+function updatePageUndoButtons() {
+  const u = document.getElementById('page-btn-undo');
+  const r = document.getElementById('page-btn-redo');
+  if (u) u.disabled = pageUndoStack.length < 2;
+  if (r) r.disabled = pageRedoStack.length === 0;
+}
+
+// Global keyboard shortcut — only when rich editor modal is NOT open
+document.addEventListener('keydown', (e) => {
+  const modalOpen = document.getElementById('rich-modal').classList.contains('visible');
+  if (modalOpen) return; // rich editor handles its own undo
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+    e.preventDefault();
+    pageUndo();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+    e.preventDefault();
+    pageRedo();
+  }
+});
+
+function deleteCard(btn) {
+  const row = btn.closest('.card-row');
+  const i = parseInt(row.dataset.index);
+  if (isNaN(i)) return;
+  recordPageUndo();
+  cards.splice(i, 1);
+  meta.splice(i, 1);
+  const scrollY = window.scrollY;
+  row.style.transition = 'opacity 0.15s';
+  row.style.opacity = '0';
+  setTimeout(() => { renderCards(); window.scrollTo(0, scrollY); }, 150);
+  toast('Card deleted');
+}
+
+function insertCardAt(pos) {
+  recordPageUndo();
+  const refMeta = meta[Math.min(pos, meta.length - 1)] || { deck:'', type:'Basic', tag:'' };
+  cards.splice(pos, 0, { frontHtml:'', backHtml:'' });
+  meta.splice(pos, 0, { ...refMeta });
+  renderCards();
+  // Open editor on the new front field
+  setTimeout(() => openRichEditor(pos, 'front'), 60);
+  toast(`Card inserted at position ${pos + 1}`);
+}
+
+function addCardAtEnd() { insertCardAt(cards.length); }
+
+// ── FILTER ────────────────────────────────────────────────────────────
+
+function filterCards(q) { filterText = q; renderCards(); }
+
+// ── EXPORT ────────────────────────────────────────────────────────────
+
+function buildCSV() {
+  return cards.map((card, i) => {
+    const m = meta[i] || { deck:'Deck', type:'Basic', tag:'' };
+    return [m.deck, m.type, m.tag, card.frontHtml, card.backHtml].join('\t');
+  }).join('\n');
+}
+
+function openExport() {
+  document.getElementById('export-textarea').value = buildCSV();
+  document.getElementById('export-count').textContent = `${cards.length} cards`;
+  document.getElementById('export-modal').classList.add('visible');
+  setTimeout(() => {
+    const ta = document.getElementById('export-textarea');
+    ta.focus(); ta.select();
+  }, 80);
+}
+
+function closeExport() { document.getElementById('export-modal').classList.remove('visible'); }
+
+function copyExport() {
+  const ta = document.getElementById('export-textarea');
+  ta.select();
+  navigator.clipboard.writeText(ta.value)
+    .then(() => toast('Copied to clipboard ✓'))
+    .catch(() => { document.execCommand('copy'); toast('Copied to clipboard ✓'); });
+}
+
+document.getElementById('export-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeExport();
+});
+
+// ── RESET ─────────────────────────────────────────────────────────────
+
+function resetImport() {
+  cards = []; meta = []; filterText = '';
+  document.getElementById('import-zone').style.display = 'block';
+  document.getElementById('editor-zone').style.display = 'none';
+  document.getElementById('export-bar').classList.remove('visible');
+  document.getElementById('export-btn').style.display = 'none';
+  document.getElementById('reset-btn').style.display = 'none';
+  document.getElementById('search-box').style.display = 'none';
+  document.getElementById('font-slider-wrap').style.display = 'none';
+  document.getElementById('page-undo-wrap').style.display = 'none';
+  pageUndoStack = []; pageRedoStack = [];
+  document.getElementById('csv-input').value = '';
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────────
+
+function updateCount() { document.getElementById('card-count').textContent = cards.length; }
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function loadDemo() {
+  document.getElementById('csv-input').value =
+    `Brûlures\tBasic\tbrulures::intro\t<span style="color:cyan">Définissez une brûlure. 📘</span>\t<span style="color:cyan">Destruction du revêtement cutané et des structures sous-jacentes</span>, secondaire le plus souvent à un agent thermique. 🔥\n` +
+    `Brûlures\tBasic\tbrulures::physio::agents\t<span style="color:red">Quelles sont les brûlures thermiques les plus fréquentes ? ⚠️</span>\tChez l'<span style="color:red">adulte</span> : <span style="color:red">flamme</span>.<br>Chez l'<span style="color:red">enfant</span> : <span style="color:red">liquide</span>. 🔥\n` +
+    `Brûlures\tBasic\tbrulures::bilan::etendue\t<span style="color:cyan">Quelle est la règle utilisée chez l'adulte pour l'étendue des brûlures ? 📘</span>\t<span style="color:cyan">Règle des 9 de Wallace 📘</span>.\n` +
+    `Brûlures\tBasic\tbrulures::bilan::profondeur\t<span style="color:purple">Décrivez le 3ème degré. 🔄</span>\t<span style="color:orange">Pas de douleur ⚠️</span><br><span style="color:red">Pas de cicatrisation spontanée ⚠️</span>`;
+  parseCSV();
+}
+</script>
+</body>
+</html>
