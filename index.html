@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Anki CSV Editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap');
 
@@ -245,7 +247,8 @@
     </div>
     <input id="search-box" type="text" placeholder="Search cards…" oninput="filterCards(this.value)" style="display:none">
     <button class="btn btn-ghost" onclick="resetImport()" id="reset-btn" style="display:none">↩ New Import</button>
-    <button class="btn btn-accent" onclick="openExport()" id="export-btn" style="display:none">⬇ Export CSV</button>
+    <button class="btn btn-ghost" onclick="openExport()" id="export-btn" style="display:none">⬇ Export CSV</button>
+    <button class="btn btn-accent" onclick="downloadApkg()" id="apkg-btn" style="display:none">⬇ Export .apkg</button>
   </div>
 </header>
 
@@ -256,7 +259,7 @@
   <div class="import-row">
     <button class="btn btn-accent" onclick="parseCSV()">Parse CSV →</button>
     <button class="btn btn-ghost" onclick="loadDemo()">Load Demo</button>
-    <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted)">Tab-separated · Deck / Type / Tag / Front / Back</span>
+    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted)">Tab-separated · Deck / Type / Tag / Front / Back</span>
   </div>
 </div>
 
@@ -274,7 +277,8 @@
   <div class="export-info"><strong id="card-count">0</strong> cards</div>
   <div style="display:flex;gap:10px">
     <button class="btn btn-ghost" onclick="addCardAtEnd()">+ Add Card</button>
-    <button class="btn btn-accent" onclick="openExport()">⬇ Export CSV</button>
+    <button class="btn btn-ghost" onclick="openExport()">⬇ Export CSV</button>
+    <button class="btn btn-accent" onclick="downloadApkg()">⬇ Export .apkg</button>
   </div>
 </div>
 
@@ -520,6 +524,7 @@ function showEditor() {
   document.getElementById('editor-zone').style.display = 'block';
   document.getElementById('export-bar').classList.add('visible');
   document.getElementById('export-btn').style.display = '';
+  document.getElementById('apkg-btn').style.display = '';
   document.getElementById('reset-btn').style.display = '';
   document.getElementById('search-box').style.display = '';
   document.getElementById('font-slider-wrap').style.display = '';
@@ -977,7 +982,7 @@ function addCardAtEnd() { insertCardAt(cards.length); }
 
 function filterCards(q) { filterText = q; renderCards(); }
 
-// ── EXPORT ────────────────────────────────────────────────────────────
+// ── EXPORT CSV ────────────────────────────────────────────────────────
 
 function buildCSV() {
   return cards.map((card, i) => {
@@ -1010,6 +1015,133 @@ document.getElementById('export-modal').addEventListener('click', function(e) {
   if (e.target === this) closeExport();
 });
 
+// ── EXPORT APKG ───────────────────────────────────────────────────────
+
+async function downloadApkg() {
+  if (!cards.length) return toast('Aucune carte à exporter');
+  if (typeof initSqlJs === 'undefined' || typeof JSZip === 'undefined') {
+    return toast('Librairies non chargées (vérifie ta connexion)');
+  }
+  toast('Génération du .apkg…');
+
+  try {
+    const SQL = await initSqlJs({
+      locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+    });
+    const db = new SQL.Database();
+
+    db.run(`
+      CREATE TABLE col (id integer primary key, crt integer not null, mod integer not null,
+        scm integer not null, ver integer not null, dty integer not null, usn integer not null,
+        ls integer not null, conf text not null, models text not null, decks text not null,
+        dconf text not null, tags text not null);
+      CREATE TABLE notes (id integer primary key, guid text not null, mid integer not null,
+        mod integer not null, usn integer not null, tags text not null, flds text not null,
+        sfld integer not null, csum integer not null, flags integer not null, data text not null);
+      CREATE TABLE cards (id integer primary key, nid integer not null, did integer not null,
+        ord integer not null, mod integer not null, usn integer not null, type integer not null,
+        queue integer not null, due integer not null, ivl integer not null, factor integer not null,
+        reps integer not null, lapses integer not null, left integer not null, odue integer not null,
+        odid integer not null, flags integer not null, data text not null);
+      CREATE TABLE revlog (id integer primary key, cid integer not null, usn integer not null,
+        ease integer not null, ivl integer not null, lastIvl integer not null, factor integer not null,
+        time integer not null, type integer not null);
+      CREATE TABLE graves (usn integer not null, oid integer not null, type integer not null);
+      CREATE INDEX ix_notes_usn ON notes (usn);
+      CREATE INDEX ix_cards_usn ON cards (usn);
+      CREATE INDEX ix_revlog_usn ON revlog (usn);
+      CREATE INDEX ix_cards_nid ON cards (nid);
+      CREATE INDEX ix_cards_sched ON cards (did, queue, due);
+      CREATE INDEX ix_notes_csum ON notes (csum);
+    `);
+
+    const now = Date.now();
+    const nowSec = Math.floor(now / 1000);
+    const modelId = now;
+
+    // Un deck par nom de deck présent dans le CSV
+    const deckNames = [...new Set(meta.map(m => m.deck || 'Default'))];
+    const deckIds = {};
+    const decks = {
+      '1': { id: 1, name: 'Default', mod: nowSec, usn: -1, collapsed: false, desc: '', dyn: 0, conf: 1,
+             lrnToday: [0,0], revToday: [0,0], newToday: [0,0], timeToday: [0,0], extendNew: 10, extendRev: 50 }
+    };
+    deckNames.forEach((name, idx) => {
+      const id = now + idx + 1;
+      deckIds[name] = id;
+      decks[id] = { ...decks['1'], id, name };
+    });
+
+    const model = {
+      id: modelId, name: 'Basic', type: 0, mod: nowSec, usn: -1, sortf: 0, did: 1,
+      tmpls: [{ name: 'Card 1', ord: 0, qfmt: '{{Front}}', afmt: '{{FrontSide}}<hr id="answer">{{Back}}',
+                bqfmt: '', bafmt: '', did: null, bfont: '', bsize: 0 }],
+      flds: [
+        { name: 'Front', ord: 0, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
+        { name: 'Back',  ord: 1, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] }
+      ],
+      // Pour un thème sombre : background-color: #1a1a1a; color: #c8c8c8;
+      css: '.card { font-family: arial; font-size: 20px; text-align: center; color: black; background-color: white; }',
+      latexPre: '', latexPost: '', req: [[0, 'any', [0]]], tags: [], vers: []
+    };
+
+    const conf = { nextPos: 1, estTimes: true, activeDecks: [1], sortType: 'noteFld', timeLim: 0,
+                   sortBackwards: false, addToCur: true, curDeck: 1, newBury: true, newSpread: 0,
+                   dueCounts: true, curModel: String(modelId), collapseTime: 1200 };
+    const dconf = { '1': { id: 1, name: 'Default', replayq: true, lapse: { leechFails: 8, minInt: 1,
+                    leechAction: 0, delays: [10], mult: 0 }, rev: { perDay: 100, fuzz: 0.05, ivlFct: 1,
+                    maxIvl: 36500, ease4: 1.3, bury: true, minSpace: 1 }, timer: 0, maxTaken: 60,
+                    usn: 0, new: { perDay: 20, delays: [1, 10], separate: true, ints: [1, 4, 7],
+                    initialFactor: 2500, bury: true, order: 1 }, mod: 0, autoplay: true } };
+
+    db.run('INSERT INTO col VALUES (1,?,?,?,11,0,0,0,?,?,?,?,?)',
+      [nowSec, now, now, JSON.stringify(conf), JSON.stringify({ [modelId]: model }),
+       JSON.stringify(decks), JSON.stringify(dconf), '{}']);
+
+    // Checksum Anki : 8 premiers hex du SHA-1 du premier champ (sans HTML)
+    const sha1 = async (str) => {
+      const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(str));
+      return parseInt(Array.from(new Uint8Array(buf)).slice(0, 4)
+        .map(b => b.toString(16).padStart(2, '0')).join(''), 16);
+    };
+    const stripHtml = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent || ''; };
+
+    for (let i = 0; i < cards.length; i++) {
+      const noteId = now + 1000 + i;
+      const cardId = now + 100000 + i;
+      const front = cards[i].frontHtml;
+      const back  = cards[i].backHtml;
+      const tags  = ' ' + (meta[i].tag || '').trim().replace(/\s+/g, '_') + ' ';
+      const did   = deckIds[meta[i].deck || 'Default'];
+      const csum  = await sha1(stripHtml(front));
+      const guid  = (now + i).toString(36);
+
+      db.run('INSERT INTO notes VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [noteId, guid, modelId, nowSec, -1, tags, front + '\x1f' + back, stripHtml(front), csum, 0, '']);
+      db.run('INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [cardId, noteId, did, 0, nowSec, -1, 0, 0, i + 1, 0, 0, 0, 0, 0, 0, 0, 0, '']);
+    }
+
+    const zip = new JSZip();
+    zip.file('collection.anki2', db.export());
+    zip.file('media', '{}');
+    const blob = await zip.generateAsync({ type: 'blob' });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (deckNames[0] || 'deck') + '.apkg';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('✓ .apkg téléchargé');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur lors de la génération du .apkg');
+  }
+}
+
 // ── RESET ─────────────────────────────────────────────────────────────
 
 function resetImport() {
@@ -1018,6 +1150,7 @@ function resetImport() {
   document.getElementById('editor-zone').style.display = 'none';
   document.getElementById('export-bar').classList.remove('visible');
   document.getElementById('export-btn').style.display = 'none';
+  document.getElementById('apkg-btn').style.display = 'none';
   document.getElementById('reset-btn').style.display = 'none';
   document.getElementById('search-box').style.display = 'none';
   document.getElementById('font-slider-wrap').style.display = 'none';
