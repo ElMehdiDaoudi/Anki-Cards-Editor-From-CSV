@@ -74,13 +74,13 @@
   #editor-zone { padding: 0 32px 80px; display: none; }
   .deck-info { padding: 14px 0; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
   .deck-info span { color: var(--accent2); font-weight: 400; }
-  .col-headers { display: grid; grid-template-columns: 36px 1fr 1fr 1fr 72px; gap: 10px; padding: 0 12px 8px; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  .col-headers { display: grid; grid-template-columns: 36px 1fr 1fr 72px; gap: 10px; padding: 0 12px 8px; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
 
   .insert-line { display: flex; align-items: center; gap: 8px; margin: 3px 0; opacity: 0; transition: opacity 0.2s; height: 22px; }
   .insert-line:hover, .insert-line.show { opacity: 1; }
   .insert-line hr { flex: 1; border: none; border-top: 1px dashed var(--border); }
 
-  .card-row { display: grid; grid-template-columns: 36px 1fr 1fr 1fr 72px; gap: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 2px; transition: border-color 0.15s, box-shadow 0.15s; animation: slideIn 0.18s ease; }
+  .card-row { display: grid; grid-template-columns: 36px 1fr 1fr 72px; gap: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 2px; transition: border-color 0.15s, box-shadow 0.15s; animation: slideIn 0.18s ease; }
   @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
   .card-row:hover { border-color: #2892d7; box-shadow: 0 2px 16px rgba(0,0,0,0.5); }
 
@@ -97,7 +97,6 @@
   .card-field-preview:hover { border-color: var(--border); background: rgba(255,255,255,0.03); }
   .card-field-preview.front { border-left: 2px solid rgba(241,219,75,0.25); }
   .card-field-preview.back  { border-left: 2px solid rgba(40,146,215,0.2); }
-  .card-field-preview.expl  { border-left: 2px solid rgba(200,120,255,0.25); font-size: 14px; }
   .card-field-preview.empty { color: var(--muted); font-style: italic; }
   .card-field-preview ul { padding-left: 1.4em; margin: 4px 0; list-style-type: disc; }
   .card-field-preview ol { padding-left: 1.4em; margin: 4px 0; list-style-type: decimal; }
@@ -265,11 +264,11 @@
 <!-- IMPORT -->
 <div id="import-zone">
   <div class="import-label">// paste your CSV content below</div>
-  <textarea id="csv-input" placeholder="Deck&#9;Type&#9;Tag&#9;Front&#9;Back&#9;Explication&#10;..."></textarea>
+  <textarea id="csv-input" placeholder="Deck&#9;Type&#9;Tag&#9;Front&#9;Back&#10;..."></textarea>
   <div class="import-row">
     <button class="btn btn-accent" onclick="parseCSV()">Parse CSV →</button>
     <button class="btn btn-ghost" onclick="loadDemo()">Load Demo</button>
-    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted)">Tab-separated · Deck / Type / Tag / Front / Back / Explication (optionnel)</span>
+    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted)">Tab-separated · Deck / Type / Tag / Front / Back</span>
   </div>
 </div>
 
@@ -277,7 +276,7 @@
 <div id="editor-zone">
   <div class="deck-info" id="deck-info"></div>
   <div class="col-headers">
-    <div>#</div><div>🟡 Front</div><div>🔵 Back</div><div>🟣 Pourquoi</div><div></div>
+    <div>#</div><div>🟡 Front</div><div>🔵 Back</div><div></div>
   </div>
   <div id="cards-list"></div>
 </div>
@@ -374,7 +373,6 @@ let filterText = '';
 let richCardIndex = -1;
 let richField     = '';   // 'front' | 'back'
 let savedSel      = null; // saved Selection for toolbar ops
-const FIELD_KEY = { front:'frontHtml', back:'backHtml', expl:'explHtml' };
 
 // ── UNDO / REDO STACK ─────────────────────────────────────────────────
 const UNDO_LIMIT = 100;
@@ -522,7 +520,7 @@ function parseCSV() {
     const cols = line.split('\t');
     if (cols.length < 2) continue;
     meta.push({ deck: cols[0]||'', type: cols[1]||'', tag: cols[2]||'' });
-    cards.push({ frontHtml: cols[3]||'', backHtml: cols[4]||'', explHtml: (cols[5]||'').replace(/\r$/,'') });
+    cards.push({ frontHtml: cols[3]||'', backHtml: cols[4]||'' });
   }
   if (!cards.length) return toast('No valid rows found.');
   showEditor();
@@ -567,8 +565,7 @@ function renderCards() {
   cards.forEach((card, i) => {
     const ft = htmlToText(card.frontHtml).toLowerCase();
     const bt = htmlToText(card.backHtml).toLowerCase();
-    const et = htmlToText(card.explHtml || '').toLowerCase();
-    if (filter && !ft.includes(filter) && !bt.includes(filter) && !et.includes(filter)) return;
+    if (filter && !ft.includes(filter) && !bt.includes(filter)) return;
 
     const row = document.createElement('div');
     row.className = 'card-row';
@@ -596,21 +593,9 @@ function renderCards() {
     }
     backPrev.addEventListener('click', () => openRichEditor(i, 'back'));
 
-    // Explanation preview (section "Pourquoi ?")
-    const explPrev = document.createElement('div');
-    explPrev.className = 'card-field-preview expl';
-    if (card.explHtml) {
-      explPrev.innerHTML = card.explHtml;
-    } else {
-      explPrev.textContent = 'Click to add explanation…';
-      explPrev.classList.add('empty');
-    }
-    explPrev.addEventListener('click', () => openRichEditor(i, 'expl'));
-
     row.innerHTML = `<div class="card-num">${i + 1}</div>`;
     row.appendChild(frontPrev);
     row.appendChild(backPrev);
-    row.appendChild(explPrev);
 
     const actions = document.createElement('div');
     actions.className = 'card-actions';
@@ -646,7 +631,7 @@ function openRichEditor(cardIdx, field) {
   richCardIndex = cardIdx;
   richField     = field;
 
-  const html = cards[cardIdx][FIELD_KEY[field]] || '';
+  const html = field === 'front' ? cards[cardIdx].frontHtml : cards[cardIdx].backHtml;
 
   document.getElementById('rich-editor-label').textContent =
     `card #${cardIdx + 1} · ${field}`;
@@ -665,7 +650,8 @@ function closeRichEditor(save) {
     recordPageUndo();
     const editor = document.getElementById('rich-editor');
     const newHtml = serializeEditor(editor);
-    cards[richCardIndex][FIELD_KEY[richField]] = newHtml;
+    if (richField === 'front') cards[richCardIndex].frontHtml = newHtml;
+    else                       cards[richCardIndex].backHtml  = newHtml;
     const scrollY = window.scrollY;
     renderCards();
     window.scrollTo(0, scrollY);
@@ -991,7 +977,7 @@ function deleteCard(btn) {
 function insertCardAt(pos) {
   recordPageUndo();
   const refMeta = meta[Math.min(pos, meta.length - 1)] || { deck:'', type:'Basic', tag:'' };
-  cards.splice(pos, 0, { frontHtml:'', backHtml:'', explHtml:'' });
+  cards.splice(pos, 0, { frontHtml:'', backHtml:'' });
   meta.splice(pos, 0, { ...refMeta });
   renderCards();
   // Open editor on the new front field
@@ -1010,7 +996,7 @@ function filterCards(q) { filterText = q; renderCards(); }
 function buildCSV() {
   return cards.map((card, i) => {
     const m = meta[i] || { deck:'Deck', type:'Basic', tag:'' };
-    return [m.deck, m.type, m.tag, card.frontHtml, card.backHtml, card.explHtml || ''].join('\t');
+    return [m.deck, m.type, m.tag, card.frontHtml, card.backHtml].join('\t');
   }).join('\n');
 }
 
@@ -1097,18 +1083,14 @@ async function downloadApkg() {
 
     const model = {
       id: modelId, name: 'Basic', type: 0, mod: nowSec, usn: -1, sortf: 0, did: 1,
-      tmpls: [{ name: 'Card 1', ord: 0, qfmt: '{{Front}}', afmt: '{{FrontSide}}<hr id="answer">{{Back}}' +
-                      '{{#Explication}}<details class="why"><summary>Pourquoi ?</summary><div class="why-body">{{Explication}}</div></details>{{/Explication}}',
+      tmpls: [{ name: 'Card 1', ord: 0, qfmt: '{{Front}}', afmt: '{{FrontSide}}<hr id="answer">{{Back}}',
                 bqfmt: '', bafmt: '', did: null, bfont: '', bsize: 0 }],
       flds: [
         { name: 'Front', ord: 0, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
-        { name: 'Back',  ord: 1, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
-        { name: 'Explication', ord: 2, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] }
+        { name: 'Back',  ord: 1, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] }
       ],
       // Pour un thème sombre : background-color: #1a1a1a; color: #c8c8c8;
-      css: '.card { font-family: arial; font-size: 20px; text-align: center; color: black; background-color: white; } ' +
-             'details.why { margin-top: 18px; text-align: left; border: 1px solid #ccc; border-radius: 8px; padding: 8px 12px; font-size: 17px; } ' +
-             'details.why summary { cursor: pointer; font-weight: bold; color: #2892d7; } .why-body { margin-top: 8px; }',
+      css: '.card { font-family: arial; font-size: 20px; text-align: center; color: black; background-color: white; }',
       latexPre: '', latexPost: '', req: [[0, 'any', [0]]], tags: [], vers: []
     };
 
@@ -1144,7 +1126,7 @@ async function downloadApkg() {
       const guid  = (now + i).toString(36);
 
       db.run('INSERT INTO notes VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-        [noteId, guid, modelId, nowSec, -1, tags, front + '\x1f' + back + '\x1f' + (cards[i].explHtml || ''), stripHtml(front), csum, 0, '']);
+        [noteId, guid, modelId, nowSec, -1, tags, front + '\x1f' + back, stripHtml(front), csum, 0, '']);
       db.run('INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         [cardId, noteId, did, 0, nowSec, -1, 0, 0, i + 1, 0, 0, 0, 0, 0, 0, 0, 0, '']);
     }
