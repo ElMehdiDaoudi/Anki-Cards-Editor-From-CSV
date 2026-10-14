@@ -238,6 +238,25 @@
 
   .btn-ghost:disabled { opacity: 0.28; cursor: not-allowed; }
   .btn-ghost:disabled:hover { border-color: var(--border); color: var(--text); transform: none; }
+
+  /* ── AUTOSAVE / PROJECTS ── */
+  .header-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .save-status { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); white-space: nowrap; transition: color 0.2s; }
+  .save-status.saved  { color: var(--accent); }
+  .save-status.error  { color: #ff5a5a; }
+  #project-name { background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 16px; padding: 6px 10px; width: 220px; outline: none; transition: border-color 0.15s, background 0.15s; }
+  #project-name:hover { border-color: var(--border); }
+  #project-name:focus { border-color: var(--accent2); background: var(--surface); }
+
+  #projects-list { display: flex; flex-direction: column; gap: 8px; }
+  .project-row { display: flex; align-items: center; gap: 12px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+  .project-row:hover { border-color: var(--accent2); box-shadow: 0 2px 16px rgba(0,0,0,0.5); }
+  .project-main { flex: 1; min-width: 0; }
+  .project-name { font-size: 17px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .project-sub { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .project-actions { display: flex; gap: 6px; }
+  .project-actions .btn-move { width: 32px; height: 28px; font-size: 14px; }
+  #projects-section { display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -246,6 +265,8 @@
   <h1><svg class="logo-mark" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true"><rect x="22" y="10" width="30" height="40" rx="6" fill="none" stroke="#2892d7" stroke-width="3.5" transform="rotate(10 37 30)"/><rect x="12" y="14" width="30" height="40" rx="6" fill="#141414" stroke="#36f1cd" stroke-width="3.5"/><polygon points="31,21 21,36 27,36 24,47 34,32 28,32" fill="#36f1cd"/></svg>
     <span>Anki <em>CSV Editor</em></span></h1>
   <div class="header-actions">
+    <input id="project-name" type="text" placeholder="Project name" spellcheck="false" style="display:none" title="Rename project">
+    <span id="save-status" class="save-status saved" style="display:none" title="Every change is stored automatically in this browser">✓ Saved</span>
     <div class="font-slider-wrap" id="font-slider-wrap" style="display:none">
       <span class="slider-label">A</span>
       <input type="range" id="font-slider" min="11" max="22" value="14" step="1" oninput="applyFontSize(this.value)">
@@ -256,7 +277,7 @@
       <button class="btn btn-ghost" id="page-btn-redo" onclick="pageRedo()" disabled title="Redo (Ctrl+Y)">↪ redo</button>
     </div>
     <input id="search-box" type="text" placeholder="Search cards…" oninput="filterCards(this.value)" style="display:none">
-    <button class="btn btn-ghost" onclick="resetImport()" id="reset-btn" style="display:none">↩ New Import</button>
+    <button class="btn btn-ghost" onclick="goHome()" id="reset-btn" style="display:none">← Projects</button>
     <button class="btn btn-ghost" onclick="openExport()" id="export-btn" style="display:none">⬇ Export CSV</button>
     <button class="btn btn-accent" onclick="downloadApkg()" id="apkg-btn" style="display:none">⬇ Export .apkg</button>
   </div>
@@ -264,10 +285,14 @@
 
 <!-- IMPORT -->
 <div id="import-zone">
-  <div class="import-label">// paste your CSV content below</div>
+  <div id="projects-section">
+    <div class="import-label">// your projects · saved automatically on this device</div>
+    <div id="projects-list"></div>
+  </div>
+  <div class="import-label">// new project — paste your CSV content below</div>
   <textarea id="csv-input" placeholder="Deck&#9;Type&#9;Tag&#9;Front&#9;Back&#9;Explication&#10;..."></textarea>
   <div class="import-row">
-    <button class="btn btn-accent" onclick="parseCSV()">Parse CSV →</button>
+    <button class="btn btn-accent" onclick="parseCSV()">Create project →</button>
     <button class="btn btn-ghost" onclick="loadDemo()">Load Demo</button>
     <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted)">Tab-separated · Deck / Type / Tag / Front / Back / Explication (optionnel)</span>
   </div>
@@ -327,8 +352,9 @@
       <div id="html-preview"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeRichEditor(false)">Cancel</button>
-      <button class="btn btn-accent" onclick="closeRichEditor(true)">Save ✓</button>
+      <span class="copy-hint">// changes are saved automatically</span>
+      <button class="btn btn-ghost" onclick="closeRichEditor(true)" title="Discard the changes made in this window">Cancel</button>
+      <button class="btn btn-accent" onclick="closeRichEditor(false)">Done ✓</button>
     </div>
   </div>
 </div>
@@ -370,10 +396,164 @@ let cards = [];
 let meta  = [];
 let filterText = '';
 
+// ── LOCAL STORAGE (IndexedDB) + AUTOSAVE ─────────────────────────────
+const DB_NAME = 'anki-csv-editor', DB_STORE = 'projects', LAST_KEY = 'anki-csv-editor:last';
+let currentProject = null;            // { id, name, createdAt }
+let saveTimer = null, pendingSaves = 0, lastSave = Promise.resolve(), saveErrorShown = false;
+let dbPromise = null;
+
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('IndexedDB unavailable'));
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE, { keyPath: 'id' });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
+}
+function dbRun(mode, fn) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(DB_STORE, mode);
+    const req = fn(tx.objectStore(DB_STORE));
+    tx.oncomplete = () => resolve(req ? req.result : undefined);
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  }));
+}
+const dbPut    = rec => dbRun('readwrite', st => st.put(rec));
+const dbGet    = id  => dbRun('readonly',  st => st.get(id));
+const dbGetAll = ()  => dbRun('readonly',  st => st.getAll());
+const dbDelete = id  => dbRun('readwrite', st => st.delete(id));
+
+function setStatus(state) {
+  const el = document.getElementById('save-status');
+  if (!el) return;
+  el.className = 'save-status ' + state;
+  el.textContent = state === 'saving' ? 'Saving…' : state === 'error' ? '⚠ Not saved' : '✓ Saved';
+}
+
+function scheduleSave() {
+  if (!currentProject) return;
+  setStatus('saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { saveTimer = null; saveNow(); }, 300);
+}
+
+function saveNow() {
+  if (!currentProject) return lastSave;
+  const rec = {
+    id: currentProject.id, name: currentProject.name, createdAt: currentProject.createdAt,
+    updatedAt: Date.now(),
+    cards: cards.map(c => ({ ...c })), meta: meta.map(m => ({ ...m }))
+  };
+  pendingSaves++;
+  setStatus('saving');
+  lastSave = dbPut(rec).then(() => {
+    pendingSaves--;
+    if (!pendingSaves && !saveTimer) setStatus('saved');
+  }).catch(err => {
+    pendingSaves--;
+    console.error('Autosave failed', err);
+    setStatus('error');
+    if (!saveErrorShown) { saveErrorShown = true; toast('⚠ Could not save locally — export your CSV to be safe'); }
+  });
+  return lastSave;
+}
+
+function flushSave() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; saveNow(); }
+  return lastSave;
+}
+
+window.addEventListener('pagehide', flushSave);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+
+function newProjectId() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function esc(str) { return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function openProject(id) {
+  let rec;
+  try { rec = await dbGet(id); } catch (e) { return false; }
+  if (!rec) return false;
+  currentProject = { id: rec.id, name: rec.name, createdAt: rec.createdAt };
+  cards = rec.cards || []; meta = rec.meta || [];
+  filterText = ''; document.getElementById('search-box').value = '';
+  pageUndoStack = []; pageRedoStack = [];
+  showEditor();
+  return true;
+}
+
+async function renderProjects() {
+  const box = document.getElementById('projects-list');
+  const section = document.getElementById('projects-section');
+  let items = [];
+  try { items = await dbGetAll(); }
+  catch (e) {
+    section.style.display = '';
+    box.innerHTML = '<div class="empty-state">// local storage unavailable in this browser — changes cannot be saved</div>';
+    return;
+  }
+  items.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  section.style.display = items.length ? '' : 'none';
+  box.innerHTML = items.map(p => {
+    const when = new Date(p.updatedAt || p.createdAt || Date.now()).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    return `<div class="project-row" data-id="${esc(p.id)}">
+      <div class="project-main">
+        <div class="project-name">${esc(p.name)}</div>
+        <div class="project-sub">${(p.cards || []).length} cards · edited ${esc(when)}</div>
+      </div>
+      <div class="project-actions">
+        <button class="btn-move" data-act="rename" title="Rename">✎</button>
+        <button class="btn-danger" data-act="delete" title="Delete project">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('projects-list').addEventListener('click', async (e) => {
+  const row = e.target.closest('.project-row');
+  if (!row) return;
+  const id  = row.dataset.id;
+  const act = (e.target.closest('[data-act]') || {}).dataset?.act || 'open';
+  if (act === 'open') {
+    if (!(await openProject(id))) toast('Could not open this project');
+  } else if (act === 'rename') {
+    const rec = await dbGet(id);
+    if (!rec) return;
+    const name = prompt('Rename project', rec.name);
+    if (name && name.trim()) { rec.name = name.trim(); await dbPut(rec); renderProjects(); }
+  } else if (act === 'delete') {
+    const rec = await dbGet(id);
+    if (rec && confirm(`Delete "${rec.name}" and all its cards? This cannot be undone.`)) {
+      await dbDelete(id); renderProjects(); toast('Project deleted');
+    }
+  }
+});
+
+document.getElementById('project-name').addEventListener('input', (e) => {
+  if (!currentProject) return;
+  currentProject.name = e.target.value.trim() || 'Untitled';
+  document.title = currentProject.name + ' · Anki CSV Editor';
+  scheduleSave();
+});
+
+// A click closes a modal only if the press ALSO started on the backdrop
+// (dragging a text selection out of the dialog must not close it).
+function bindBackdropClose(overlay, closeFn) {
+  let downOnBackdrop = false;
+  overlay.addEventListener('pointerdown', (e) => { downOnBackdrop = (e.target === overlay); });
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay && downOnBackdrop) closeFn();
+    downOnBackdrop = false;
+  });
+}
+
 // ── RICH EDITOR STATE ─────────────────────────────────────────────────
 let richCardIndex = -1;
 let richField     = '';   // 'front' | 'back'
 let savedSel      = null; // saved Selection for toolbar ops
+let richLive = false, richOriginal = '', richIsNew = false;
 const FIELD_KEY = { front:'frontHtml', back:'backHtml', expl:'explHtml' };
 
 // ── UNDO / REDO STACK ─────────────────────────────────────────────────
@@ -525,6 +705,10 @@ function parseCSV() {
     cards.push({ frontHtml: cols[3]||'', backHtml: cols[4]||'', explHtml: (cols[5]||'').replace(/\r$/,'') });
   }
   if (!cards.length) return toast('No valid rows found.');
+  const firstDeck = (meta[0] && meta[0].deck || '').trim();
+  currentProject = { id: newProjectId(), name: firstDeck || 'Untitled', createdAt: Date.now() };
+  pageUndoStack = []; pageRedoStack = [];
+  saveNow();
   showEditor();
 }
 
@@ -541,6 +725,12 @@ function showEditor() {
   document.getElementById('font-slider-wrap').style.display = '';
   document.getElementById('page-undo-wrap').style.display = 'flex';
   recordPageUndo(); // seed initial state
+  const pn = document.getElementById('project-name');
+  pn.value = currentProject.name; pn.style.display = '';
+  document.getElementById('save-status').style.display = '';
+  setStatus('saved');
+  document.title = currentProject.name + ' · Anki CSV Editor';
+  try { localStorage.setItem(LAST_KEY, currentProject.id); } catch (e) {}
   const decks = [...new Set(meta.map(m=>m.deck))];
   const tags  = [...new Set(meta.map(m=>m.tag))];
   document.getElementById('deck-info').innerHTML =
@@ -574,38 +764,16 @@ function renderCards() {
     row.className = 'card-row';
     row.dataset.index = i;
 
-    // Front preview
-    const frontPrev = document.createElement('div');
-    frontPrev.className = 'card-field-preview front';
-    if (card.frontHtml) {
-      frontPrev.innerHTML = card.frontHtml;
-    } else {
-      frontPrev.textContent = 'Click to edit front…';
-      frontPrev.classList.add('empty');
-    }
-    frontPrev.addEventListener('click', () => openRichEditor(i, 'front'));
-
-    // Back preview
-    const backPrev = document.createElement('div');
-    backPrev.className = 'card-field-preview back';
-    if (card.backHtml) {
-      backPrev.innerHTML = card.backHtml;
-    } else {
-      backPrev.textContent = 'Click to edit back…';
-      backPrev.classList.add('empty');
-    }
-    backPrev.addEventListener('click', () => openRichEditor(i, 'back'));
-
-    // Explanation preview (section "Pourquoi ?")
-    const explPrev = document.createElement('div');
-    explPrev.className = 'card-field-preview expl';
-    if (card.explHtml) {
-      explPrev.innerHTML = card.explHtml;
-    } else {
-      explPrev.textContent = 'Click to add explanation…';
-      explPrev.classList.add('empty');
-    }
-    explPrev.addEventListener('click', () => openRichEditor(i, 'expl'));
+    const mkPreview = (field) => {
+      const el = document.createElement('div');
+      el.className = 'card-field-preview ' + field;
+      fillPreview(el, card[FIELD_KEY[field]], field);
+      el.addEventListener('click', () => openRichEditor(i, field));
+      return el;
+    };
+    const frontPrev = mkPreview('front');
+    const backPrev  = mkPreview('back');
+    const explPrev  = mkPreview('expl');
 
     row.innerHTML = `<div class="card-num">${i + 1}</div>`;
     row.appendChild(frontPrev);
@@ -642,11 +810,41 @@ function makeInsertLine(pos) {
 
 // ── RICH EDITOR ───────────────────────────────────────────────────────
 
-function openRichEditor(cardIdx, field) {
+const PLACEHOLDER = { front: 'Click to edit front…', back: 'Click to edit back…', expl: 'Click to add explanation…' };
+
+function fillPreview(el, html, field) {
+  el.classList.remove('empty');
+  if (html) { el.innerHTML = html; }
+  else { el.textContent = PLACEHOLDER[field]; el.classList.add('empty'); }
+  const sz = document.getElementById('font-slider');
+  if (sz) el.style.fontSize = sz.value + 'px';
+}
+
+function refreshPreview(i, field) {
+  const row = document.querySelector(`.card-row[data-index="${i}"]`);
+  if (!row) return;
+  const el = row.querySelector('.card-field-preview.' + field);
+  if (el) fillPreview(el, cards[i][FIELD_KEY[field]], field);
+}
+
+// Every edit is applied to the card immediately and autosaved
+function liveApply(html) {
+  if (richCardIndex < 0 || !cards[richCardIndex]) return;
+  const key = FIELD_KEY[richField];
+  if ((cards[richCardIndex][key] || '') === html) return;
+  cards[richCardIndex][key] = html;
+  refreshPreview(richCardIndex, richField);
+  scheduleSave();
+}
+
+function openRichEditor(cardIdx, field, isNew = false) {
+  richLive      = false;
   richCardIndex = cardIdx;
   richField     = field;
+  richIsNew     = isNew;
 
   const html = cards[cardIdx][FIELD_KEY[field]] || '';
+  richOriginal = html;   // what "Cancel" goes back to
 
   document.getElementById('rich-editor-label').textContent =
     `card #${cardIdx + 1} · ${field}`;
@@ -657,21 +855,32 @@ function openRichEditor(cardIdx, field) {
   resetUndoHistory(editor.innerHTML);
 
   document.getElementById('rich-modal').classList.add('visible');
+  richLive = true;
   setTimeout(() => { editor.focus(); placeCaretAtEnd(editor); }, 80);
 }
 
-function closeRichEditor(save) {
-  if (save) {
-    recordPageUndo();
-    const editor = document.getElementById('rich-editor');
-    const newHtml = serializeEditor(editor);
-    cards[richCardIndex][FIELD_KEY[richField]] = newHtml;
-    const scrollY = window.scrollY;
-    renderCards();
-    window.scrollTo(0, scrollY);
-    toast('Saved ✓');
+// revert=false → "Done" (changes are already saved) · revert=true → "Cancel"
+function closeRichEditor(revert) {
+  clearTimeout(undoDebounceTimer);
+  richLive = false;
+  const i = richCardIndex;
+  if (i >= 0 && cards[i]) {
+    if (revert && richIsNew) {            // a card created just for this edit → discard it
+      cards.splice(i, 1); meta.splice(i, 1);
+      recordPageUndo(); scheduleSave();
+    } else if (revert) {
+      cards[i][FIELD_KEY[richField]] = richOriginal;
+      scheduleSave();
+      toast('Changes reverted');
+    } else {
+      recordPageUndo(); scheduleSave();
+    }
   }
+  richCardIndex = -1;
   document.getElementById('rich-modal').classList.remove('visible');
+  const scrollY = window.scrollY;
+  renderCards();
+  window.scrollTo(0, scrollY);
 }
 
 // Live HTML preview + undo recording
@@ -686,6 +895,7 @@ function updateHtmlPreview() {
   const editor = document.getElementById('rich-editor');
   const html = serializeEditor(editor);
   document.getElementById('html-preview').textContent = html;
+  if (richLive) liveApply(html);
 }
 
 // ── TOOLBAR ACTIONS ───────────────────────────────────────────────────
@@ -890,9 +1100,7 @@ function placeCaretAtEnd(el) {
 }
 
 // Close rich modal on backdrop click
-document.getElementById('rich-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeRichEditor(false);
-});
+bindBackdropClose(document.getElementById('rich-modal'), () => closeRichEditor(false));
 
 // ── CARD OPS ──────────────────────────────────────────────────────────
 
@@ -923,6 +1131,7 @@ function applySnapshot(snap) {
   renderCards();
   window.scrollTo(0, scrollY);
   updatePageUndoButtons();
+  scheduleSave();
 }
 
 function pageUndo() {
@@ -965,10 +1174,10 @@ function moveCard(btn, dir) {
   const i = parseInt(row.dataset.index);
   const j = i + dir;
   if (j < 0 || j >= cards.length) return;
-  recordPageUndo();
   // Swap cards and meta
   [cards[i], cards[j]] = [cards[j], cards[i]];
   [meta[i],  meta[j]]  = [meta[j],  meta[i]];
+  recordPageUndo(); scheduleSave();
   const scrollY = window.scrollY;
   renderCards();
   window.scrollTo(0, scrollY);
@@ -978,9 +1187,9 @@ function deleteCard(btn) {
   const row = btn.closest('.card-row');
   const i = parseInt(row.dataset.index);
   if (isNaN(i)) return;
-  recordPageUndo();
   cards.splice(i, 1);
   meta.splice(i, 1);
+  recordPageUndo(); scheduleSave();
   const scrollY = window.scrollY;
   row.style.transition = 'opacity 0.15s';
   row.style.opacity = '0';
@@ -989,13 +1198,13 @@ function deleteCard(btn) {
 }
 
 function insertCardAt(pos) {
-  recordPageUndo();
   const refMeta = meta[Math.min(pos, meta.length - 1)] || { deck:'', type:'Basic', tag:'' };
   cards.splice(pos, 0, { frontHtml:'', backHtml:'', explHtml:'' });
   meta.splice(pos, 0, { ...refMeta });
+  recordPageUndo(); scheduleSave();
   renderCards();
-  // Open editor on the new front field
-  setTimeout(() => openRichEditor(pos, 'front'), 60);
+  // Open editor on the new front field (Cancel discards the new card)
+  setTimeout(() => openRichEditor(pos, 'front', true), 60);
   toast(`Card inserted at position ${pos + 1}`);
 }
 
@@ -1034,9 +1243,7 @@ function copyExport() {
     .catch(() => { document.execCommand('copy'); toast('Copied to clipboard ✓'); });
 }
 
-document.getElementById('export-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeExport();
-});
+bindBackdropClose(document.getElementById('export-modal'), closeExport);
 
 // ── EXPORT APKG ───────────────────────────────────────────────────────
 
@@ -1171,7 +1378,9 @@ async function downloadApkg() {
 
 // ── RESET ─────────────────────────────────────────────────────────────
 
-function resetImport() {
+async function goHome() {
+  await flushSave();
+  currentProject = null;
   cards = []; meta = []; filterText = '';
   document.getElementById('import-zone').style.display = 'block';
   document.getElementById('editor-zone').style.display = 'none';
@@ -1182,8 +1391,13 @@ function resetImport() {
   document.getElementById('search-box').style.display = 'none';
   document.getElementById('font-slider-wrap').style.display = 'none';
   document.getElementById('page-undo-wrap').style.display = 'none';
+  document.getElementById('project-name').style.display = 'none';
+  document.getElementById('save-status').style.display = 'none';
   pageUndoStack = []; pageRedoStack = [];
   document.getElementById('csv-input').value = '';
+  document.title = 'Anki CSV Editor';
+  try { localStorage.removeItem(LAST_KEY); } catch (e) {}
+  renderProjects();
 }
 
 // ── UTILS ─────────────────────────────────────────────────────────────
@@ -1205,6 +1419,27 @@ function loadDemo() {
     `Brûlures\tBasic\tbrulures::bilan::profondeur\t<span style="color:purple">Décrivez le 3ème degré. 🔄</span>\t<span style="color:orange">Pas de douleur ⚠️</span><br><span style="color:red">Pas de cicatrisation spontanée ⚠️</span>`;
   parseCSV();
 }
+
+// Escape closes the open dialog (edits are already saved)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('rich-modal').classList.contains('visible')) closeRichEditor(false);
+  else if (document.getElementById('export-modal').classList.contains('visible')) closeExport();
+});
+
+// ── STARTUP: reopen the last project, or show the project list ────────
+(async function init() {
+  try {
+    await openDB();
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  } catch (e) {
+    toast('⚠ Local storage unavailable — changes will not be saved');
+  }
+  let last = null;
+  try { last = localStorage.getItem(LAST_KEY); } catch (e) {}
+  if (last && await openProject(last)) return;
+  renderProjects();
+})();
 </script>
 </body>
 </html>
