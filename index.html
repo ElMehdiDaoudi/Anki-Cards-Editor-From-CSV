@@ -256,7 +256,37 @@
   .project-sub { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 3px; }
   .project-actions { display: flex; gap: 6px; }
   .project-actions .btn-move { width: 32px; height: 28px; font-size: 14px; }
+  .shortcuts-hint { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); line-height: 2; display: flex; flex-wrap: wrap; gap: 2px 16px; align-items: center; }
+  .shortcuts-hint .sh-title { color: var(--accent2); text-transform: uppercase; letter-spacing: 0.6px; }
+  .shortcuts-hint kbd { font-family: inherit; font-size: 10.5px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin: 0 1px; }
+  .shortcuts-hint.in-modal { margin-top: 0; padding-top: 10px; flex-shrink: 0; }
   #projects-section { display: flex; flex-direction: column; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+
+  /* ── HEADER LAYOUT: one aligned row; title text drops out when space runs short ── */
+  header { gap: 16px; flex-wrap: nowrap; }
+  header h1 { flex-shrink: 0; white-space: nowrap; }
+  header.compact h1 > span { display: none; }
+  .header-actions { flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: 10px; min-width: 0; }
+  .header-actions > * { flex-shrink: 0; }
+  .header-actions .btn { height: 38px; padding-top: 0; padding-bottom: 0; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+  .header-actions .font-slider-wrap { height: 38px; padding-top: 0; padding-bottom: 0; }
+  .header-actions #search-box { height: 38px; padding-top: 0; padding-bottom: 0; width: 200px; min-width: 130px; flex-shrink: 1; }
+  .header-actions #project-name { height: 38px; padding-top: 0; padding-bottom: 0; width: 180px; min-width: 110px; flex-shrink: 1; }
+  .header-actions #page-undo-wrap { align-items: center; }
+  .save-status { min-width: 74px; text-align: right; }
+  /* progressive squeeze (classes added by fitHeader): title text → tighter controls → header export buttons (still in the bottom bar) */
+  header.tight { padding-left: 20px; padding-right: 20px; gap: 10px; }
+  header.tight .header-actions { gap: 6px; }
+  header.tight .header-actions .btn { font-size: 14px; padding-left: 10px; padding-right: 10px; }
+  header.tight .header-actions .font-slider-wrap { padding-left: 8px; padding-right: 8px; gap: 5px; }
+  header.tight #font-slider { width: 56px; }
+  header.tight .save-status { min-width: 62px; font-size: 12px; }
+  header.measuring, header.measuring * { transition: none !important; }
+  header.noexport #export-btn, header.noexport #apkg-btn { display: none !important; }
+  @media (max-width: 880px) {
+    header { flex-wrap: wrap; padding: 14px 16px; }
+    .header-actions { flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
@@ -305,13 +335,14 @@
     <div>#</div><div>🟡 Front</div><div>🔵 Back</div><div>🟣 Pourquoi</div><div></div>
   </div>
   <div id="cards-list"></div>
+  <div class="shortcuts-hint" id="page-shortcuts"></div>
 </div>
 
 <!-- EXPORT BAR -->
 <div id="export-bar">
   <div class="export-info"><strong id="card-count">0</strong> cards</div>
   <div style="display:flex;gap:10px">
-    <button class="btn btn-ghost" onclick="addCardAtEnd()">+ Add Card</button>
+    <button class="btn btn-ghost" onclick="addCardAtEnd()" title="Add card (Alt+N)">+ Add Card</button>
     <button class="btn btn-ghost" onclick="openExport()">⬇ Export CSV</button>
     <button class="btn btn-accent" onclick="downloadApkg()">⬇ Export .apkg</button>
   </div>
@@ -350,11 +381,12 @@
       <!-- Live HTML preview -->
       <div class="html-preview-label">// output HTML</div>
       <div id="html-preview"></div>
+      <div class="shortcuts-hint in-modal" id="rich-shortcuts"></div>
     </div>
     <div class="modal-footer">
       <span class="copy-hint">// changes are saved automatically</span>
-      <button class="btn btn-ghost" onclick="closeRichEditor(true)" title="Discard the changes made in this window">Cancel</button>
-      <button class="btn btn-accent" onclick="closeRichEditor(false)">Done ✓</button>
+      <button class="btn btn-ghost" onclick="closeRichEditor(true)" title="Discard the changes made in this window (Shift+Esc)">Cancel</button>
+      <button class="btn btn-accent" onclick="closeRichEditor(false)" title="Close (Ctrl/⌘+Enter or Esc)">Done ✓</button>
     </div>
   </div>
 </div>
@@ -1160,6 +1192,8 @@ function updatePageUndoButtons() {
 document.addEventListener('keydown', (e) => {
   const modalOpen = document.getElementById('rich-modal').classList.contains('visible');
   if (modalOpen) return; // rich editor handles its own undo
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return; // native undo in text fields
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
     e.preventDefault();
     pageUndo();
@@ -1420,12 +1454,117 @@ function loadDemo() {
   parseCSV();
 }
 
-// Escape closes the open dialog (edits are already saved)
+// ── KEYBOARD SHORTCUTS ────────────────────────────────────────────────
+const IS_MAC = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+const MOD = IS_MAC ? '⌘' : 'Ctrl', ALT = IS_MAC ? '⌥' : 'Alt';
+
+function buildShortcutHints() {
+  const kb   = keys => keys.map(k => `<kbd>${k}</kbd>`).join('+');
+  const item = (keys, label) => `<span>${kb(keys)} ${label}</span>`;
+  document.getElementById('page-shortcuts').innerHTML =
+    `<span class="sh-title">Shortcuts</span>` +
+    item([MOD,'S'], 'save now') + item([ALT,'N'], 'new card') +
+    item([MOD,'Z'], 'undo') + item([MOD,'Y'], 'redo') +
+    item(['/'], 'search') + item([ALT,'E'], 'export CSV') +
+    `<span class="sh-title">In the card editor</span>` +
+    item([MOD,'Enter'], 'done') + item(['Esc'], 'done') + item(['Shift','Esc'], 'cancel (revert)') +
+    item([ALT,'N'], 'done + new card after') +
+    item([ALT,'1–6'], 'colors C R P O G W') + item([ALT,'0'], 'remove color') +
+    item([ALT,'L'], 'bullet list') + item([ALT,'Shift','L'], 'numbered list') +
+    item([MOD,'Z'], 'undo') + item([MOD,'Y'], 'redo');
+  document.getElementById('rich-shortcuts').innerHTML =
+    item([MOD,'Enter'], 'done') + item(['Esc'], 'done') + item(['Shift','Esc'], 'cancel') +
+    item([ALT,'1–6'], 'colors') + item([ALT,'0'], 'no color') +
+    item([ALT,'L'], 'list') + item([ALT,'N'], 'next new card');
+}
+buildShortcutHints();
+
+const SHORTCUT_COLORS = ['cyan','red','purple','orange','green','white'];
+
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  if (document.getElementById('rich-modal').classList.contains('visible')) closeRichEditor(false);
-  else if (document.getElementById('export-modal').classList.contains('visible')) closeExport();
+  const mod       = e.ctrlKey || e.metaKey;
+  const richOpen  = document.getElementById('rich-modal').classList.contains('visible');
+  const exportOpen = document.getElementById('export-modal').classList.contains('visible');
+  const t = e.target;
+  const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+  // Save now (also stops the browser's "save page" dialog)
+  if (mod && !e.altKey && e.code === 'KeyS' && currentProject) {
+    e.preventDefault();
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    saveNow().then(() => {
+      if (!document.getElementById('save-status').classList.contains('error')) toast('Saved ✓');
+    });
+    return;
+  }
+
+  if (richOpen) {
+    if (e.key === 'Escape') { e.preventDefault(); closeRichEditor(e.shiftKey); return; }
+    if (mod && e.key === 'Enter') { e.preventDefault(); closeRichEditor(false); return; }
+    if (e.altKey && !mod) {
+      const m = e.code.match(/^Digit([0-6])$/);
+      if (m) {
+        e.preventDefault(); saveSelection();
+        if (m[1] === '0') removeColor(); else applyColor(SHORTCUT_COLORS[+m[1] - 1]);
+        return;
+      }
+      if (e.code === 'KeyL') { e.preventDefault(); saveSelection(); insertList(e.shiftKey ? 'ol' : 'ul'); return; }
+      if (e.code === 'KeyN') {
+        e.preventDefault();
+        const next = richCardIndex + 1;
+        closeRichEditor(false);
+        insertCardAt(next);
+        return;
+      }
+    }
+    return;
+  }
+
+  if (exportOpen) { if (e.key === 'Escape') closeExport(); return; }
+
+  // Search box: Esc clears it
+  if (e.key === 'Escape' && t && t.id === 'search-box') {
+    t.value = ''; filterCards(''); t.blur(); return;
+  }
+
+  if (!currentProject) return;
+
+  if (e.altKey && !mod && e.code === 'KeyN') { e.preventDefault(); addCardAtEnd(); return; }
+  if (e.altKey && !mod && e.code === 'KeyE') { e.preventDefault(); openExport(); return; }
+  if (e.key === '/' && !typing && !mod && !e.altKey) {
+    e.preventDefault();
+    const sb = document.getElementById('search-box'); sb.focus(); sb.select();
+  }
 });
+
+// ── HEADER FIT: hide the title text when the row would overflow ───────
+function fitHeader() {
+  const h = document.querySelector('header');
+  const steps = ['compact', 'tight', 'noexport'];
+  h.classList.add('measuring');                  // no transitions while measuring
+  steps.forEach(c => h.classList.remove(c));
+  if (window.innerWidth <= 880) { h.classList.remove('measuring'); return; }  // narrow screens wrap instead
+  // The action row is right-aligned, so overflow spills LEFT over the title:
+  // compare its first visible item with the title's right edge.
+  const crowded = () => {
+    const first = [...h.querySelectorAll('.header-actions > *')].find(e => e.offsetParent !== null);
+    if (!first) return false;
+    return first.getBoundingClientRect().left < h.querySelector('h1').getBoundingClientRect().right + 12;
+  };
+  for (const c of steps) {
+    if (!crowded()) break;
+    h.classList.add(c);
+  }
+  crowded();                                     // force layout while transitions are off
+  h.classList.remove('measuring');
+}
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(fitHeader);
+  ro.observe(document.querySelector('header'));
+  ro.observe(document.querySelector('.header-actions'));
+}
+window.addEventListener('resize', fitHeader);
+fitHeader();
 
 // ── STARTUP: reopen the last project, or show the project list ────────
 (async function init() {
